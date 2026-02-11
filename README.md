@@ -28,21 +28,26 @@ The AI agent sends commands (click, type, screenshot, etc.) through MCP. The MCP
 npm install -g viyv-browser-mcp
 ```
 
-### 2. Register the Native Messaging Host
-
-```bash
-viyv-browser-mcp setup
-```
-
-This registers a Native Messaging manifest so Chrome can communicate with the MCP server.
-
-### 3. Install the Chrome Extension
+### 2. Install the Chrome Extension
 
 1. Download `viyv-browser-extension.zip` from the [latest release](https://github.com/BrainFiber/viyv-browser/releases/latest)
 2. Unzip the file
 3. Open `chrome://extensions/` in Chrome
 4. Enable **Developer mode** (top-right toggle)
 5. Click **Load unpacked** and select the unzipped folder
+6. **Copy the Extension ID** shown on the extension card (e.g. `egbeddcbonhdkefgeoleapmcfnpnaokl`)
+
+### 3. Register the Native Messaging Host
+
+Run setup with the Extension ID from step 2:
+
+```bash
+viyv-browser-mcp setup --extension-id "YOUR_EXTENSION_ID"
+```
+
+> **Important:** The `--extension-id` flag is required. Chrome Native Messaging does not support wildcard origins — the manifest must contain the exact extension ID. Without it, the extension will fail to connect with `"Specified native messaging host not found"`.
+
+After running setup, **reload the extension** from `chrome://extensions/` (click the reload icon on the Viyv Browser card).
 
 ### 4. Connect to Your AI Agent
 
@@ -66,6 +71,17 @@ Add to your AI client's MCP configuration:
 | Claude Code | `~/.claude/settings.json` or `claude mcp add` |
 | Claude Desktop | `~/Library/Application Support/Claude/claude_desktop_config.json` |
 | Cursor | `.cursor/mcp.json` |
+
+### 5. Verify the Connection
+
+1. Start your AI client (this launches the MCP Server automatically)
+2. The Chrome extension connects to the MCP Server via Native Messaging
+3. The extension icon should show a connected state
+4. You can verify in the extension's Service Worker console (`chrome://extensions/` → Viyv Browser → "Inspect views: service worker"):
+   - `[viyv-browser:native-host] Found socket at /tmp/viyv-browser.sock` — Native Host connected to MCP Server
+   - `[viyv-browser:SW] Native messaging connected` — Extension connected to Native Host
+
+> **Note:** The Native Host waits for the MCP Server socket to appear (polls every 2s, up to 120s). It's normal for the extension to show "waiting for socket" until you start your AI client.
 
 ## MCP Tools
 
@@ -191,14 +207,11 @@ viyv-browser-mcp
 # Start with a named agent session
 viyv-browser-mcp --agent-name "my-agent"
 
-# Native Host mode (called by Chrome, not manually)
+# Native Host mode (launched by Chrome automatically, not run manually)
 viyv-browser-mcp --native-host
 
-# Register Native Messaging Host manifest
-viyv-browser-mcp setup
-
-# Register with a specific extension ID (for production)
-viyv-browser-mcp setup --extension-id "your-extension-id"
+# Register Native Messaging Host manifest (--extension-id is required)
+viyv-browser-mcp setup --extension-id "YOUR_EXTENSION_ID"
 ```
 
 ### Native Host Registration Paths
@@ -216,6 +229,21 @@ viyv-browser-mcp setup --extension-id "your-extension-id"
 - Node.js 20+
 - pnpm 9+
 - Chrome browser
+
+### Setup from Source
+
+```bash
+git clone https://github.com/BrainFiber/viyv-browser.git
+cd viyv-browser
+pnpm install
+pnpm build
+```
+
+Then load the extension from `apps/chrome-extension/build/` in Chrome, and run:
+
+```bash
+node packages/mcp-server/dist/index.js setup --extension-id "YOUR_EXTENSION_ID"
+```
 
 ### Commands
 
@@ -242,12 +270,32 @@ pnpm typecheck      # TypeScript strict check
 | `viyv-browser-mcp` | `packages/mcp-server/dist/` (tsup, shared bundled in) |
 | `@viyv-browser/chrome-extension` | `apps/chrome-extension/build/` (vite) |
 
+### Packaging the Extension
+
+```bash
+pnpm --filter @viyv-browser/chrome-extension package
+# Output: apps/chrome-extension/viyv-browser-extension.zip
+```
+
 ## Troubleshooting
 
-**Extension not connecting?**
-- Ensure the MCP server is running (`ls /tmp/viyv-browser.sock`)
-- Re-run `viyv-browser-mcp setup` to register the Native Host
-- Reload the extension from `chrome://extensions/`
+**"Specified native messaging host not found"**
+- This means Chrome cannot find or launch the Native Host. Run setup with your extension ID:
+  ```bash
+  viyv-browser-mcp setup --extension-id "YOUR_EXTENSION_ID"
+  ```
+- Find your extension ID at `chrome://extensions/` (enable Developer mode to see it)
+- After setup, **reload the extension** from `chrome://extensions/`
+
+**Extension shows "waiting for socket"**
+- This is normal. The Native Host polls for the MCP Server socket (`/tmp/viyv-browser.sock`)
+- The socket is created when your AI client starts and launches `viyv-browser-mcp`
+- Start your AI client to create the connection
+
+**Extension not connecting after setup?**
+- Verify the manifest: `cat ~/Library/Application\ Support/Google/Chrome/NativeMessagingHosts/com.viyv.browser.json`
+- Check that `allowed_origins` contains your exact extension ID
+- Ensure the wrapper script is executable: `ls -la ~/Library/Application\ Support/Google/Chrome/NativeMessagingHosts/com.viyv.browser.sh`
 
 **Screenshots too large?**
 - JPEG is used by default (quality 80). For large pages, use the `region` parameter to capture a specific area.
