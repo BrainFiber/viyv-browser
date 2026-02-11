@@ -8,6 +8,7 @@ export default defineConfig({
   clean: true,
   dts: true,
   sourcemap: true,
+  noExternal: ['@viyv-browser/shared'],
   banner: {
     js: '#!/usr/bin/env node',
   },
