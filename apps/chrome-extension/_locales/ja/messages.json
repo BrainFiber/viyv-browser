@@ -1,0 +1,10 @@
+{
+  "extName": {
+    "message": "Viyv Browser",
+    "description": "Extension name"
+  },
+  "extDescription": {
+    "message": "viyv プラットフォーム向け AI エージェントブラウザ自動操作",
+    "description": "Extension description"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "extName": {
+    "message": "Viyv Browser",
+    "description": "Extension name"
+  },
+  "extDescription": {
+    "message": "AI Agent Browser Automation for viyv platform",
+    "description": "Extension description"
+  }
+}

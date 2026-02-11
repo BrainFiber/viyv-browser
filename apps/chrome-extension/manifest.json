@@ -1,0 +1,48 @@
+{
+  "manifest_version": 3,
+  "name": "__MSG_extName__",
+  "version": "0.1.0",
+  "description": "__MSG_extDescription__",
+  "default_locale": "en",
+  "permissions": [
+    "alarms",
+    "debugger",
+    "tabs",
+    "tabGroups",
+    "activeTab",
+    "scripting",
+    "sidePanel",
+    "offscreen",
+    "nativeMessaging",
+    "storage",
+    "notifications",
+    "webNavigation",
+    "system.display"
+  ],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "src/service-worker/index.ts",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["src/content-scripts/accessibility-tree.ts"],
+      "run_at": "document_start",
+      "all_frames": true
+    },
+    {
+      "matches": ["<all_urls>"],
+      "js": ["src/content-scripts/agent-visual-indicator.ts"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "side_panel": {
+    "default_path": "src/side-panel/index.html"
+  },
+  "action": {
+    "default_popup": "src/popup/popup.html"
+  },
+  "minimum_chrome_version": "120"
+}
