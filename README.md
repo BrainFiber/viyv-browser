@@ -58,11 +58,13 @@ Add to your AI client's MCP configuration:
   "mcpServers": {
     "viyv-browser": {
       "command": "npx",
-      "args": ["viyv-browser-mcp"]
+      "args": ["viyv-browser-mcp", "--agent-name", "my-agent"]
     }
   }
 }
 ```
+
+The `--agent-name` flag sets the agent identity used for tab group isolation and session management. Without it, the agent name defaults to `"default"`.
 
 **Configuration file locations by client:**
 
@@ -71,6 +73,12 @@ Add to your AI client's MCP configuration:
 | Claude Code | `~/.claude/settings.json` or `claude mcp add` |
 | Claude Desktop | `~/Library/Application Support/Claude/claude_desktop_config.json` |
 | Cursor | `.cursor/mcp.json` |
+
+For Claude Code, you can also add it via CLI:
+
+```bash
+claude mcp add viyv-browser -- npx viyv-browser-mcp --agent-name "my-agent"
+```
 
 ### 5. Verify the Connection
 
