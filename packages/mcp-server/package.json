@@ -1,6 +1,6 @@
 {
   "name": "viyv-browser-mcp",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "MCP Server for AI agent browser automation via Chrome Extension",
   "type": "module",
   "main": "./dist/index.js",

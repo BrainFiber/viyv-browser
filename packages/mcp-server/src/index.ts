@@ -21,21 +21,47 @@ if (args.includes('setup')) {
   runSetup({ extensionId })
 } else if (args.includes('--native-host')) {
   // Native Messaging Host mode: bridge Chrome ↔ MCP Server
-  const socketPath = findSocketPath()
+  // Socket may not exist yet (MCP Server starts when AI client connects).
+  // Wait and retry until the socket appears.
+  const SOCKET_PATH = '/tmp/viyv-browser.sock'
+  const POLL_INTERVAL = 2000
+  const MAX_WAIT = 120_000
 
-  if (!socketPath) {
-    process.stderr.write(
-      '[viyv-browser:native-host] No MCP server socket found. Is the MCP server running?\n',
-    )
-    process.exit(1)
+  function waitForSocket() {
+    const start = Date.now()
+
+    function poll() {
+      const socketPath = findSocketPath()
+      if (socketPath) {
+        process.stderr.write(
+          `[viyv-browser:native-host] Found socket at ${socketPath}\n`,
+        )
+        startBridge({
+          socketPath,
+          onError: (error) => {
+            process.stderr.write(`[viyv-browser:native-host] Error: ${error.message}\n`)
+          },
+        })
+        return
+      }
+
+      if (Date.now() - start > MAX_WAIT) {
+        process.stderr.write(
+          `[viyv-browser:native-host] MCP server socket not found after ${MAX_WAIT / 1000}s. Exiting.\n`,
+        )
+        process.exit(1)
+      }
+
+      process.stderr.write(
+        `[viyv-browser:native-host] Waiting for MCP server socket (${SOCKET_PATH})...\n`,
+      )
+      setTimeout(poll, POLL_INTERVAL)
+    }
+
+    poll()
   }
 
-  startBridge({
-    socketPath,
-    onError: (error) => {
-      process.stderr.write(`[viyv-browser:native-host] Error: ${error.message}\n`)
-    },
-  })
+  waitForSocket()
 } else {
   // MCP Server mode (default) — fixed path so bridge can always find it on reconnect
   const socketPath = '/tmp/viyv-browser.sock'
