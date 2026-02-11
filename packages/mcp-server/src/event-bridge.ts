@@ -6,10 +6,14 @@
 import type { BrowserEventType, EventSubscription } from '@viyv-browser/shared'
 
 const subscriptions = new Map<string, EventSubscription>()
-let eventCallback: ((event: Record<string, unknown>) => void) | null = null
+const eventListeners = new Set<(event: Record<string, unknown>) => void>()
 
-export function setEventCallback(callback: (event: Record<string, unknown>) => void) {
-  eventCallback = callback
+export function addEventListener(cb: (event: Record<string, unknown>) => void) {
+  eventListeners.add(cb)
+}
+
+export function removeEventListener(cb: (event: Record<string, unknown>) => void) {
+  eventListeners.delete(cb)
 }
 
 export function addSubscription(sub: EventSubscription): void {
@@ -52,12 +56,15 @@ export function processEvent(event: {
     if (!sub.eventTypes.includes(event.eventType)) continue
     if (sub.urlPattern && !event.url.includes(sub.urlPattern)) continue
 
-    // Forward to daemon
-    eventCallback?.({
+    // Forward to all listeners
+    const payload = {
       type: 'browser_event',
       subscriptionId: sub.id,
       ...event,
       timestamp: Date.now(),
-    })
+    }
+    for (const listener of eventListeners) {
+      listener(payload)
+    }
   }
 }

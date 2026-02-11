@@ -67,7 +67,19 @@ if (args.includes('setup')) {
   const socketPath = '/tmp/viyv-browser.sock'
   const agentNameIdx = args.indexOf('--agent-name')
   const agentName = agentNameIdx >= 0 ? args[agentNameIdx + 1] : undefined
-  startMcpServer(socketPath, agentName)
+
+  const transportIdx = args.indexOf('--transport')
+  const transportMode = transportIdx >= 0 ? args[transportIdx + 1] : 'stdio'
+  if (transportMode !== 'stdio' && transportMode !== 'sse') {
+    process.stderr.write(
+      `[viyv-browser:mcp] Invalid transport: "${transportMode}". Must be "stdio" or "sse".\n`,
+    )
+    process.exit(1)
+  }
+  const portIdx = args.indexOf('--port')
+  const port = portIdx >= 0 ? Number(args[portIdx + 1]) : undefined
+
+  startMcpServer(socketPath, agentName, { transport: transportMode, port })
 }
 
 function findSocketPath(): string | null {

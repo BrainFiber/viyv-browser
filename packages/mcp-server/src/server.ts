@@ -1,13 +1,15 @@
 /**
  * MCP Server for viyv-browser.
- * Communicates with viyv Daemon via stdio (JSON-RPC),
+ * Communicates with viyv Daemon via stdio (JSON-RPC) or SSE (HTTP),
  * and with Chrome Extension via Unix socket <-> Native Messaging bridge.
  */
 
 import { randomUUID } from 'node:crypto'
 import { existsSync, unlinkSync } from 'node:fs'
+import http from 'node:http'
 import { type Server as NetServer, type Socket, createServer } from 'node:net'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { type BrowserEventType, MCP_SERVER, PROTOCOL_VERSION, TIMEOUTS } from '@viyv-browser/shared'
 import {
@@ -18,11 +20,12 @@ import {
   touchSession,
 } from './agent-session.js'
 import {
+  addEventListener,
   addSubscription,
   processEvent,
+  removeEventListener,
   removeSubscription,
   removeSubscriptionsByAgent,
-  setEventCallback,
 } from './event-bridge.js'
 import { isExtensionConnected, recordHeartbeat, setExtensionConnected } from './health.js'
 import { decompressPayload } from './native-host/compression.js'
@@ -37,14 +40,16 @@ interface PendingRequest {
 const pendingRequests = new Map<string, PendingRequest>()
 let extensionSocket: Socket | null = null
 
-export async function startMcpServer(socketPath: string, agentName?: string): Promise<void> {
-  if (agentName) {
-    setDefaultAgentId(agentName)
-  }
-  // -- Unix Socket Server (for Native Host connections) --
-  const socketServer = createSocketServer(socketPath)
+export interface McpServerOptions {
+  transport?: 'stdio' | 'sse'
+  port?: number
+}
 
-  // -- MCP Server (stdio transport to Daemon) --
+/**
+ * Creates a fully configured McpServer with all tools registered and event forwarding.
+ * Each SSE session needs its own McpServer instance (McpServer.connect() can only be called once).
+ */
+function createConfiguredMcpServer(): McpServer {
   const server = new McpServer({
     name: MCP_SERVER.NAME,
     version: MCP_SERVER.VERSION,
@@ -88,13 +93,8 @@ export async function startMcpServer(socketPath: string, agentName?: string): Pr
     })
   }
 
-  // Start MCP stdio transport
-  const transport = new StdioServerTransport()
-  await server.connect(transport)
-
-  // L1 FIX: Forward events through MCP logging notification instead of raw stdout write.
-  // Writing raw JSON to stdout conflicts with StdioServerTransport's protocol framing.
-  setEventCallback((event) => {
+  // Forward browser events through MCP logging notification
+  const listener = (event: Record<string, unknown>) => {
     server
       .sendLoggingMessage({
         level: 'info',
@@ -103,17 +103,137 @@ export async function startMcpServer(socketPath: string, agentName?: string): Pr
       .catch(() => {
         // Ignore send errors for events (client may not be listening)
       })
-  })
+  }
+  addEventListener(listener)
 
-  process.stderr.write(`[viyv-browser:mcp] MCP Server started, socket: ${socketPath}\n`)
+  // Clean up listener when transport closes
+  server.server.onclose = () => {
+    removeEventListener(listener)
+  }
 
-  // Cleanup on exit
-  process.on('exit', () => {
-    socketServer.close()
-    cleanupSocket(socketPath)
-  })
-  process.on('SIGINT', () => process.exit(0))
-  process.on('SIGTERM', () => process.exit(0))
+  return server
+}
+
+export async function startMcpServer(
+  socketPath: string,
+  agentName?: string,
+  options?: McpServerOptions,
+): Promise<void> {
+  if (agentName) {
+    setDefaultAgentId(agentName)
+  }
+
+  // -- Unix Socket Server (for Native Host connections) -- shared by both transports
+  const socketServer = createSocketServer(socketPath)
+
+  if (options?.transport === 'sse') {
+    // -- SSE mode: HTTP server, one McpServer per SSE session --
+    const sessions = new Map<string, { transport: SSEServerTransport; server: McpServer }>()
+
+    const httpServer = http.createServer()
+
+    httpServer.on('request', (req, res) => {
+      handleSseRequest(req, res, sessions).catch((error) => {
+        process.stderr.write(`[viyv-browser:mcp] SSE request error: ${(error as Error).message}\n`)
+        if (!res.headersSent) {
+          res.writeHead(500).end('Internal server error')
+        }
+      })
+    })
+
+    const listenPort = options.port ?? 0
+    httpServer.listen(listenPort, '127.0.0.1', () => {
+      const addr = httpServer.address()
+      const port = typeof addr === 'object' ? addr?.port : listenPort
+      process.stdout.write(`${JSON.stringify({ port })}\n`)
+      process.stderr.write(`[viyv-browser:mcp] SSE server listening on 127.0.0.1:${port}\n`)
+    })
+
+    process.stderr.write(`[viyv-browser:mcp] MCP Server started (SSE), socket: ${socketPath}\n`)
+
+    // Graceful shutdown: close SSE sessions async, then sync cleanup
+    let shuttingDown = false
+    const shutdown = async () => {
+      if (shuttingDown) return
+      shuttingDown = true
+      for (const { server: s } of sessions.values()) {
+        await s.close().catch(() => {})
+      }
+      httpServer.close(() => {})
+      socketServer.close(() => {})
+      cleanupSocket(socketPath)
+      process.exit(0)
+    }
+    process.on('SIGINT', () => {
+      shutdown()
+    })
+    process.on('SIGTERM', () => {
+      shutdown()
+    })
+
+    // Sync fallback for unexpected exit (e.g. uncaughtException)
+    // shutdown() already handled close — only clean up socket file here
+    process.on('exit', () => {
+      cleanupSocket(socketPath)
+    })
+  } else {
+    // -- stdio mode (default) --
+    const server = createConfiguredMcpServer()
+    const transport = new StdioServerTransport()
+    await server.connect(transport)
+
+    process.stderr.write(`[viyv-browser:mcp] MCP Server started (stdio), socket: ${socketPath}\n`)
+
+    process.on('SIGINT', () => process.exit(0))
+    process.on('SIGTERM', () => process.exit(0))
+
+    process.on('exit', () => {
+      socketServer.close()
+      cleanupSocket(socketPath)
+    })
+  }
+}
+
+async function handleSseRequest(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  sessions: Map<string, { transport: SSEServerTransport; server: McpServer }>,
+): Promise<void> {
+  if (req.method === 'GET' && req.url === '/sse') {
+    // New SSE session
+    const transport = new SSEServerTransport('/message', res)
+    const mcpServer = createConfiguredMcpServer()
+
+    transport.onclose = () => {
+      sessions.delete(transport.sessionId)
+    }
+
+    // Fallback: clean up session if HTTP connection closes without transport.onclose
+    res.on('close', () => {
+      if (sessions.has(transport.sessionId)) {
+        sessions.delete(transport.sessionId)
+        transport.close()
+      }
+    })
+
+    await mcpServer.connect(transport)
+
+    // Register session only after connect succeeds
+    sessions.set(transport.sessionId, { transport, server: mcpServer })
+  } else if (req.method === 'POST' && req.url?.startsWith('/message')) {
+    // Route POST to the correct session
+    const url = new URL(req.url, `http://${req.headers.host ?? 'localhost'}`)
+    const sessionId = url.searchParams.get('sessionId')
+    const session = sessionId ? sessions.get(sessionId) : null
+
+    if (session) {
+      await session.transport.handlePostMessage(req, res)
+    } else {
+      res.writeHead(404).end('Session not found')
+    }
+  } else {
+    res.writeHead(404).end()
+  }
 }
 
 function createSocketServer(socketPath: string): NetServer {
