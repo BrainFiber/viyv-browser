@@ -393,7 +393,7 @@ async function callExtensionTool(
     return handleSwitchBrowser()
   }
 
-  if (!extensionSocket || extensionSocket.destroyed || !isExtensionConnected()) {
+  if (!extensionSocket || extensionSocket.destroyed) {
     return {
       content: [
         {
