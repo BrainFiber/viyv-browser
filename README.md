@@ -38,15 +38,11 @@ This registers a Native Messaging manifest so Chrome can communicate with the MC
 
 ### 3. Install the Chrome Extension
 
-1. Clone and build the project:
-   ```bash
-   git clone https://github.com/BrainFiber/viyv-browser.git
-   cd viyv-browser
-   pnpm install && pnpm build
-   ```
-2. Open `chrome://extensions/` in Chrome
-3. Enable **Developer mode** (top-right toggle)
-4. Click **Load unpacked** and select `apps/chrome-extension/build/`
+1. Download `viyv-browser-extension.zip` from the [latest release](https://github.com/BrainFiber/viyv-browser/releases/latest)
+2. Unzip the file
+3. Open `chrome://extensions/` in Chrome
+4. Enable **Developer mode** (top-right toggle)
+5. Click **Load unpacked** and select the unzipped folder
 
 ### 4. Connect to Your AI Agent
 
